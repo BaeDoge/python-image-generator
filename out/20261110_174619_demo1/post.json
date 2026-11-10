@@ -1,0 +1,38 @@
+{
+  "product": {
+    "id": "demo1",
+    "name": "무선 핸디 청소기 대용량 배터리 올인원 세트",
+    "price": 59900,
+    "image": "",
+    "url": "https://link.coupang.com/demo",
+    "rocket": true,
+    "free_ship": true,
+    "category": "가전디지털"
+  },
+  "link": "https://link.coupang.com/demo",
+  "seed": 1665088756,
+  "hook": "간단히 치우려니 자꾸 미뤄지네요",
+  "panels": [
+    {
+      "caption": "沙发角落 먼지 쌓인 곳, 손이 안 가요",
+      "scene": "A person stands in a living room, looking at a dusty sofa corner from a distance."
+    },
+    {
+      "caption": "유모차 바퀴 먼지, 매일 매번 귀찮아요",
+      "scene": "Close-up of a stroller wheel with visible dust, seen from behind."
+    },
+    {
+      "caption": "무거운 청소기 대신 가볍고 작은 걸 찾아요",
+      "scene": "A silhouette holding a smartphone, browsing online shops in a dimly lit room."
+    }
+  ],
+  "reveal": "눈에 들어온 무선 핸디 청소기 세트",
+  "for_whom": [
+    "소형 가구 사이사이가 신경 쓰이는 분",
+    "유모차나 자동차 내부를 자주 청소하는 분",
+    "무거운 기구 없이 가볍게 치우고 싶은 분"
+  ],
+  "cta": "자세한 건 링크에서 확인해요",
+  "body": "소형 가구 사이사이 먼지나 유모차 바퀴 구석구석, 간편하게 정리하고 싶을 때 유용해요. 대용량 배터리와 올인원 세트로 부담 없이 사용 가능합니다. 59,900원에 로켓배송으로 빠르게 만나보세요.",
+  "text": "소형 가구 사이사이 먼지나 유모차 바퀴 구석구석, 간편하게 정리하고 싶을 때 유용해요. 대용량 배터리와 올인원 세트로 부담 없이 사용 가능합니다. 59,900원에 로켓배송으로 빠르게 만나보세요.\n\nhttps://link.coupang.com/demo\n\n이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다."
+}

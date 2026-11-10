@@ -1,0 +1,6 @@
+.venv\Scripts\python -m ensurepip --upgrade
+.venv\Scripts\python -m pip install --no-cache-dir torch-2.6.0+cu124-cp311-cp311-win_amd64.whl
+.venv\Scripts\python -c "import torch; print(torch.__version__, torch.cuda.is_available())"
+
+.venv\Scripts\python -m pip install --no-cache-dir requests python-dotenv openai pillow diffusers transformers accelerate safetensors peft
+

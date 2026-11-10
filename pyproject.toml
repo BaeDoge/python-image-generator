@@ -1,0 +1,29 @@
+[project]
+name = "threads-coupang-bot"
+version = "0.1.0"
+description = "쿠팡 파트너스 상품 -> 로컬 LLM 카피 + 로컬 GPU 카툰 이미지 -> Threads 자동 게시"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+  "requests>=2.31",
+  "python-dotenv>=1.0",
+  "openai>=1.40",
+  "pillow>=10.0",
+  "torch",
+  "diffusers>=0.30",
+  "transformers>=4.44",
+  "accelerate>=0.33",
+  "safetensors>=0.4",
+  "peft>=0.12",
+]
+
+# Windows + NVIDIA(A5000)에서 CUDA 빌드 torch를 받기 위한 설정
+[tool.uv.sources]
+torch = { index = "pytorch-cu124" }
+
+[[tool.uv.index]]
+name = "pytorch-cu124"
+url = "https://download.pytorch.org/whl/cu124"
+explicit = true
+
+[tool.uv]
+package = false
