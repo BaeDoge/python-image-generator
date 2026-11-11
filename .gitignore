@@ -4,3 +4,5 @@ out/
 data/
 __pycache__/
 *.pyc
+.uv_cache/
+*.whl

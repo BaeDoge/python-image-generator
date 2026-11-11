@@ -1,5 +1,5 @@
-"""로컬 GPU(SDXL, diffusers)로 만화 컷 배경(글자 없음, 얼굴 비중 낮음)을 여러 장 생성한다.
-파이프라인은 한 번만 로드하고 장면 수만큼 생성한 뒤 VRAM 을 반납한다."""
+"""로컬 GPU(SDXL, diffusers)로 장면별 후보 이미지를 여러 장 생성한다.
+파이프라인은 한 번만 로드하고, 끝나면 VRAM 을 반납한다. 프롬프트는 styles.build() 가 만든 것을 받는다."""
 from __future__ import annotations
 
 import gc
@@ -9,23 +9,13 @@ from PIL import Image
 
 from .config import flag, get
 
-NEGATIVE = (
-    "text, letters, words, numbers, watermark, logo, signature, brand name, realistic, photo, 3d render, "
-    "face close-up, deformed, extra limbs, extra fingers, blurry, low quality, cropped, cluttered, "
-    "celebrity, famous person"
-)
 WIDTH, HEIGHT = 896, 1152  # SDXL 학습 해상도 버킷 (세로 4:5 근처)
-DEFAULT_STYLE = (
-    "flat vector illustration, soft pastel color palette, rounded simple shapes, minimal, cozy mood, "
-    "clean uncluttered composition, no visible faces, large calm empty space at the top"
-)
 
 
-def build_prompt(scene: str) -> str:
-    return f"{scene}, {get('IMAGE_STYLE', DEFAULT_STYLE)}"
-
-
-def generate_scenes(scenes: list[str], seed: int | None = None, steps: int = 30) -> tuple[list[Image.Image], int]:
+def generate_candidates(
+    items: list[dict], n: int = 3, seed: int | None = None, steps: int = 30
+) -> tuple[list[list[Image.Image]], int]:
+    """items: [{'prompt','negative','scene'}...]  ->  장면별 n장의 후보 이미지 리스트."""
     import torch
     from diffusers import StableDiffusionXLPipeline
 
@@ -37,7 +27,7 @@ def generate_scenes(scenes: list[str], seed: int | None = None, steps: int = 30)
     pipe = None
     try:
         extra = {}
-        try:  # SDXL 기본 VAE 의 fp16 불안정(검은/탁한 이미지) 완화용
+        try:  # SDXL 기본 VAE 의 fp16 불안정(검은/탁한 이미지) 완화
             from diffusers import AutoencoderKL
 
             extra["vae"] = AutoencoderKL.from_pretrained("madebyollin/sdxl-vae-fp16-fix", torch_dtype=torch.float16)
@@ -49,38 +39,40 @@ def generate_scenes(scenes: list[str], seed: int | None = None, steps: int = 30)
         else:
             try:
                 pipe = StableDiffusionXLPipeline.from_pretrained(
-                    model, torch_dtype=torch.float16, variant="fp16", use_safetensors=True, **extra
-                )
+                    model, torch_dtype=torch.float16, variant="fp16", use_safetensors=True, **extra)
             except Exception:  # fp16 variant 가 없는 체크포인트
                 pipe = StableDiffusionXLPipeline.from_pretrained(
-                    model, torch_dtype=torch.float16, use_safetensors=True, **extra
-                )
+                    model, torch_dtype=torch.float16, use_safetensors=True, **extra)
+
+        try:  # 색이 탁해지는 문제를 줄이는 DPM++ 2M Karras
+            from diffusers import DPMSolverMultistepScheduler
+
+            pipe.scheduler = DPMSolverMultistepScheduler.from_config(pipe.scheduler.config, use_karras_sigmas=True)
+        except Exception as e:  # noqa: BLE001
+            print(f"[warn] 스케줄러 교체 실패(기본 사용): {e}")
 
         lora = get("STYLE_LORA")
         if lora:
             pipe.load_lora_weights(lora)
-
         if flag("IMAGE_CPU_OFFLOAD"):
             pipe.enable_model_cpu_offload()
         else:
             pipe.to("cuda")
 
-        images = []
-        for i, scene in enumerate(scenes):
-            print(f"  - 장면 {i + 1}/{len(scenes)} 생성 중: {scene}")
-            gen = torch.Generator("cuda").manual_seed(seed + i)
-            images.append(
-                pipe(
-                    prompt=build_prompt(scene),
-                    negative_prompt=NEGATIVE,
-                    width=WIDTH,
-                    height=HEIGHT,
-                    num_inference_steps=steps,
-                    guidance_scale=6.5,
-                    generator=gen,
-                ).images[0]
-            )
-        return images, seed
+        out: list[list[Image.Image]] = []
+        for i, it in enumerate(items):
+            print(f"  - 장면 {i + 1}/{len(items)} 후보 {n}장 생성: {it['scene']}")
+            cands = []
+            for k in range(n):
+                gen = torch.Generator("cuda").manual_seed(seed + i * 101 + k)
+                cands.append(
+                    pipe(
+                        prompt=it["prompt"], negative_prompt=it["negative"], width=WIDTH, height=HEIGHT,
+                        num_inference_steps=steps, guidance_scale=6.0, generator=gen,
+                    ).images[0]
+                )
+            out.append(cands)
+        return out, seed
     finally:
         del pipe
         gc.collect()
