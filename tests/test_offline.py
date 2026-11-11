@@ -26,13 +26,13 @@ GOOD = {
     "panels": [
         {"caption": "퇴근하고 보니 바닥에 먼지가 한가득", "scene": "living room floor with scattered dust, warm light"},
         {"caption": "청소기 꺼내서 선 연결하다 지치는 저녁", "scene": "tangled cord near sofa on the floor, no people"},
-        {"caption": "가볍게 쓸 만한 걸 찾아보는 중", "scene": "person seen from behind on sofa holding smartphone"},
+        {"caption": "선 없는 청소기를 찾아보는 중", "scene": "person seen from behind on sofa holding smartphone"},
     ],
     "backdrop": "tidy bright living room corner with a sofa, empty center, soft light",
     "reveal": "그러다 눈에 들어온 건",
     "for_whom": ["선 연결이 번거로웠던 분", "좁은 집을 자주 쓸어야 하는 분", "가볍게 청소하고 싶은 분"],
     "cta": "자세한 건 링크에서 확인해요",
-    "body": "퇴근하고 바닥을 보면 먼지가 은근히 신경 쓰이잖아. 선 없이 가볍게 쓸 수 있는 핸디형이 요즘 눈에 많이 띄어서 가져와 봤어. 로켓배송이라 받기도 편한 편이야.",
+    "body": "퇴근하고 바닥을 보면 먼지가 은근히 신경 쓰이잖아. 선 없이 쓰는 핸디형이 요즘 눈에 많이 띄어서 가져와 봤어. 대용량 배터리 올인원 세트에 로켓배송이야.",
 }
 
 
@@ -53,8 +53,12 @@ class WrapTests(unittest.TestCase):
 
     def test_no_orphan_last_line(self):
         f = compose._font(56)
-        lines = compose._wrap(_draw(), "선 연결이 번거로웠던 분", f, 330)
-        self.assertTrue(all(len(l.replace(" ", "")) >= 3 for l in lines), lines)
+        d = _draw()
+        text = "선 연결이 번거로웠던 분"
+        # 2줄이 가능한 폭(마지막 두 단어가 한 줄에 들어가는 폭)에서는 한 글자 고아 줄이 없어야 한다
+        max_w = int(d.textlength("번거로웠던 분", font=f)) + 4
+        lines = compose._wrap(d, text, f, max_w)
+        self.assertEqual(lines, ["선 연결이", "번거로웠던 분"])
 
 
 class TextCheckTests(unittest.TestCase):
@@ -85,6 +89,31 @@ class TextCheckTests(unittest.TestCase):
         probs = " | ".join(verify.check_story(bad, ANALYSIS, 70, 220))
         self.assertIn("금지 표현", probs)
         self.assertIn("영어(ASCII)", probs)
+
+
+class ToneAndClaimTests(unittest.TestCase):
+    NAME = "무선 핸디 청소기 대용량 배터리 올인원 세트"
+
+    def test_real_demo_output_is_now_rejected(self):
+        """실제 로컬 LLM 데모 출력: 광고체 종결 + 상품명에 없는 장점이 통과했던 문구들"""
+        bad = json.loads(json.dumps(GOOD))
+        bad["panels"][1]["caption"] = "무거운 청소기 들고 계단 오르는 것이 힘듭니다"
+        bad["panels"][2]["caption"] = "가벼운 핸디형으로 소파 틈새까지 손쉽게"
+        bad["body"] = ("거실 바닥에서 소파 틈새, 차 안까지 먼지 제거가 번거로우셨나요. 대용량 배터리로 오래 쓸 수 있는 올인원 세트를 "
+                       "소개합니다. 가벼운 핸디형이라 계단 난간 청소도 수월합니다.")
+        probs = " | ".join(verify.check_story(bad, ANALYSIS, 70, 220, self.NAME))
+        self.assertIn("광고체/문어체", probs)
+        self.assertIn("가벼", probs)
+        self.assertIn("수월", probs)
+        self.assertIn("오래 쓸", probs)
+
+    def test_stem_in_product_name_is_allowed(self):
+        ok = json.loads(json.dumps(GOOD)); ok["cta"] = "강력한 구성 링크에서 확인"
+        self.assertEqual(verify.check_story(ok, ANALYSIS, 70, 220, "강력 흡입 청소기"), [])
+
+    def test_needs_phrase_in_for_whom_is_allowed(self):
+        ok = json.loads(json.dumps(GOOD)); ok["for_whom"][2] = "가볍게 청소하고 싶은 분"
+        self.assertEqual(verify.check_story(ok, ANALYSIS, 70, 220, self.NAME), [])
 
 
 class ImageCheckTests(unittest.TestCase):

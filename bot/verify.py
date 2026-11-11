@@ -19,6 +19,12 @@ BANNED = [
     "연예인", "유명인", "셀럽", "추천템",
 ]
 
+# 광고체/문어체 종결 (~합니다, ~드립니다, ~소개합니다) -> 사람이 쓴 구어체가 아님
+_FORMAL = re.compile(r"니다(?=[\s.!?…~]|$)")
+
+# 상품명에 없는데 LLM 이 자주 덧붙이는 '장점' 어간. 상품명에 같은 어간이 있을 때만 허용한다.
+BENEFIT_STEMS = ["가볍", "가벼", "수월", "손쉽", "간편", "편리", "강력", "오래 쓸", "오래 쓰", "깔끔하게", "튼튼", "조용", "빠르게", "효과"]
+
 # 한글 본문에 허용할 문자 (한자/가나/기타 문자 혼입 차단 -> 렌더링 시 깨진 글자 방지)
 _ALLOWED_CHAR = re.compile(r"[가-힣ㄱ-ㅎㅏ-ㅣ0-9A-Za-z\s.,!?~·…\-+/%()\[\]'\"“”‘’:;&×]")
 
@@ -34,7 +40,7 @@ def _korean_fields(s: dict) -> list[tuple[str, str]]:
     return [(k, str(v).strip()) for k, v in out]
 
 
-def check_story(s: dict, analysis: dict, min_body: int, max_body: int) -> list[str]:
+def check_story(s: dict, analysis: dict, min_body: int, max_body: int, product_name: str = "") -> list[str]:
     """구조/문장 규칙 위반 목록 (비어 있으면 통과)."""
     out: list[str] = []
     limits = {"hook": (1, 24), "reveal": (1, 24), "cta": (1, 24), "body": (min_body, max_body)}
@@ -52,6 +58,12 @@ def check_story(s: dict, analysis: dict, min_body: int, max_body: int) -> list[s
             out.append(f"{key} 에 링크/해시태그 금지")
         if re.search(r"(\S{2,})\s+\1", text):
             out.append(f"{key} 에 같은 단어 반복")
+        if not key.startswith("for_whom"):  # '이런 분께' 는 명사구라 제외
+            if _FORMAL.search(text):
+                out.append(f"{key} 에 광고체/문어체 종결(~합니다/~드립니다) 금지 -> ~해요/~거든요/~더라 같은 구어체로")
+            for stem in BENEFIT_STEMS:
+                if stem in text and stem not in product_name:
+                    out.append(f"{key} 에 상품명에 없는 장점 표현 '{stem}…' -> 삭제하거나 상황 묘사로 바꾸기")
 
     panels = s.get("panels") or []
     if len(panels) != 3:
@@ -95,8 +107,9 @@ FACT_USER = """상품 데이터(이것만 사실로 인정):
 [검증할 장면 묘사(영어, 이미지 생성용)]
 {scenes}
 
-1) unsupported_claims: 문구 중 상품 데이터에 없는 '성능·스펙·효능·수치·인증·수상·비교우위' 주장을 그대로 적으세요.
-   (상황 묘사, '이런 분께' 같은 공감 문구, 데이터와 맞는 가격/배송 언급은 문제 아님)
+1) unsupported_claims: 문구 중 상품 데이터에 없는 '성능·스펙·효능·수치·인증·수상·비교우위·장점' 주장을 그대로 적으세요.
+   상품명에서 직접 읽히지 않는 추론 장점도 주장입니다 (예: '대용량 배터리' -> '오래 쓸 수 있다', '핸디' -> '가볍다'는 근거 없음).
+   (불편한 상황 묘사, '이런 분께' 같은 공감 문구, 데이터와 맞는 가격/배송 언급은 문제 아님)
 2) unrelated_scenes: 장면 묘사 중 '{ptype}' 이(가) 실제로 쓰이는 상황과 어울리지 않는 장소/사물이 등장하는 것을 그대로 적으세요.
 {{"unsupported_claims": [], "unrelated_scenes": []}}"""
 

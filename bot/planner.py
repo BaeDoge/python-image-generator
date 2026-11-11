@@ -44,7 +44,10 @@ PLAN_SYSTEM = """당신은 쇼핑 정보를 '공감되는 짧은 만화 스토�
 - 캡션은 서로 다른 내용으로 이야기가 이어지게(상황 → 심화 → 탐색) 쓰고, 같은 단어를 반복하지 않습니다.
 - scene 은 영어로 25단어 이내. visual_motifs 에 없는 새로운 장소·사물(예: 상품과 무관한 물건)을 추가하지 않습니다. 한 장면에 초점은 하나, 소품은 3개 이하, 사람은 뒷모습/실루엣/손만. 글자·브랜드·로고 묘사 금지.
   각 panel 의 scene 에는 분석 결과 visual_motifs 중 최소 1개를 반드시 포함하세요. 상품 자체는 그리지 않습니다(상품 사진은 별도로 합성됨).
-- 말투는 자연스러운 구어체, 이모지·해시태그·링크·광고 문구는 쓰지 않습니다(코드가 따로 붙임).
+- 말투는 사람이 쓴 듯한 구어체(해요체 또는 반말)입니다. '~합니다/~드립니다/~소개합니다/~시작하세요' 같은 광고체·문어체 종결은 쓰지 않습니다.
+- 상품의 장점은 상품명에 적힌 표현만 씁니다. '가볍다, 편리하다, 강력하다, 오래 쓴다, 수월하다' 같은 장점은 상품명에 없으면 쓰지 말고,
+  대신 '이런 상황에서 필요할 수 있다', '이런 구성이다(상품명 그대로)'까지만 말합니다.
+- 이모지·해시태그·링크·광고 문구는 쓰지 않습니다(코드가 따로 붙임).
 - 출력은 JSON 한 개만."""
 
 PLAN_USER = """상품 데이터: {name} / {price}원 / 카테고리 {category} / 로켓배송 {rocket} / 무료배송 {free_ship}
@@ -116,7 +119,7 @@ def build_story(product: Product, link: str, max_tries: int = 4) -> tuple[dict, 
     last = ""
     for n in range(1, max_tries + 1):
         raw_story = llm.chat_json(messages, temperature=0.8)
-        problems = verify.check_story(raw_story, analysis, min_len, max_len)
+        problems = verify.check_story(raw_story, analysis, min_len, max_len, product.name)
         if not problems:
             try:
                 problems = verify.fact_check(raw_story, product, analysis)
