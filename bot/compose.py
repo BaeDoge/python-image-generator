@@ -49,20 +49,58 @@ def fit_cover(img: Image.Image, w: int, h: int) -> Image.Image:
     return img.crop((left, top, left + w, top + h))
 
 
-def _wrap(draw, text: str, font, max_w: int) -> list[str]:
-    lines, cur = [], ""
-    for ch in text:
-        if ch == "\n":
-            lines.append(cur)
-            cur = ""
-        elif draw.textlength(cur + ch, font=font) <= max_w:
-            cur += ch
+def _char_chunks(draw, word: str, font, max_w: int) -> list[str]:
+    chunks, cur = [], ""
+    for ch in word:
+        if cur and draw.textlength(cur + ch, font=font) > max_w:
+            chunks.append(cur)
+            cur = ch
         else:
-            lines.append(cur)
-            cur = ch.lstrip()
-    if cur:
-        lines.append(cur)
-    return lines
+            cur += ch
+    return chunks + ([cur] if cur else [])
+
+
+def _wrap(draw, text: str, font, max_w: int) -> list[str]:
+    """단어(공백) 단위로만 줄을 나누고, 줄 길이가 고르게 되도록 DP 로 균형을 맞춘다.
+    (한 글자짜리 고아 줄, 단어 중간 끊김 방지. 한 단어가 한 줄보다 길 때만 글자 단위로 쪼갬)"""
+    out: list[str] = []
+    for para in text.split("\n"):
+        toks: list[tuple[str, str]] = []  # (조각, 앞에 붙일 구분자)
+        for w in para.split():
+            if draw.textlength(w, font=font) <= max_w:
+                toks.append((w, " "))
+            else:
+                for i, c in enumerate(_char_chunks(draw, w, font, max_w)):
+                    toks.append((c, " " if i == 0 else ""))
+        if not toks:
+            out.append("")
+            continue
+
+        def line(i: int, j: int) -> str:
+            s = toks[i][0]
+            for k in range(i + 1, j):
+                s += toks[k][1] + toks[k][0]
+            return s
+
+        n = len(toks)
+        INF = float("inf")
+        best = [INF] * (n + 1)
+        prev = [0] * (n + 1)
+        best[0] = 0.0
+        for j in range(1, n + 1):
+            for i in range(j - 1, -1, -1):
+                width = draw.textlength(line(i, j), font=font)
+                if width > max_w and j - i > 1:
+                    break
+                cost = best[i] + (max_w - min(width, max_w)) ** 2 + 0.15 * max_w**2  # 줄 수 페널티
+                if cost < best[j]:
+                    best[j], prev[j] = cost, i
+        lines, j = [], n
+        while j > 0:
+            lines.append(line(prev[j], j))
+            j = prev[j]
+        out.extend(reversed(lines))
+    return out
 
 
 def _ellipsize(draw, text: str, font, max_w: int, max_lines: int) -> list[str]:
@@ -241,32 +279,39 @@ def _badges(d, x: int, y: int, product: Product) -> None:
         x += bw + 12
 
 
-def _product_slide(prod_img: Image.Image, product: Product, reveal: str, accent, page: int, total: int) -> Image.Image:
-    canvas = gradient_bg(accent).convert("RGBA")
+def _product_slide(prod_img: Image.Image, product: Product, reveal: str, accent, page: int, total: int,
+                   backdrop: Image.Image | None = None) -> Image.Image:
+    if backdrop is not None:  # 카테고리에 맞게 생성한 빈 배경을 살짝 흐리고 파스텔로 덮어 가독성 확보
+        base = fit_cover(backdrop.convert("RGB"), W, H).filter(ImageFilter.GaussianBlur(4))
+        canvas = Image.blend(base, Image.new("RGB", (W, H), _blend(accent, 0.9)), 0.45).convert("RGBA")
+    else:
+        canvas = gradient_bg(accent).convert("RGBA")
     ov = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     d = ImageDraw.Draw(ov)
 
-    f, lines, size = _fit_text(d, reveal, W - 2 * MARGIN - 40, 2, 68, 44)
-    y = MARGIN + 20
+    f, lines, size = _fit_text(d, reveal, W - 2 * MARGIN - 80, 2, 64, 44)
+    line_h = int(size * 1.3)
+    panel_h = line_h * len(lines) + 56
+    d.rounded_rectangle((MARGIN, MARGIN, W - MARGIN, MARGIN + panel_h), 40, fill=(255, 255, 255, 235))
+    y = MARGIN + 28
     for ln in lines:
         d.text(((W - d.textlength(ln, font=f)) / 2, y), ln, font=f, fill=INK)
-        y += int(size * 1.3)
+        y += line_h
 
+    card_top = H - MARGIN - 250
+    area_top, area_bot = MARGIN + panel_h + 30, card_top - 30
     cut = remove_bg(prod_img)
     item = _sticker(cut) if cut else _card_item(prod_img)
-    box_w, box_h = W - 2 * MARGIN - 60, 640
-    item.thumbnail((box_w, box_h), Image.LANCZOS)
-    ix, iy = (W - item.width) // 2, 230 + (box_h - item.height) // 2
-    ov.alpha_composite(item, (ix, iy))
+    item.thumbnail((W - 2 * MARGIN - 60, area_bot - area_top), Image.LANCZOS)
+    ov.alpha_composite(item, ((W - item.width) // 2, area_top + (area_bot - area_top - item.height) // 2))
 
-    top = H - MARGIN - 250
-    d.rounded_rectangle((MARGIN, top, W - MARGIN, H - MARGIN - 40), 36, fill=(255, 255, 255, 240))
+    d.rounded_rectangle((MARGIN, card_top, W - MARGIN, H - MARGIN - 40), 36, fill=(255, 255, 255, 240))
     name_f = _font(36)
     for i, ln in enumerate(_ellipsize(d, product.name, name_f, W - 2 * MARGIN - 60, 2)):
-        d.text((MARGIN + 30, top + 26 + i * 46), ln, font=name_f, fill=SUB)
+        d.text((MARGIN + 30, card_top + 26 + i * 46), ln, font=name_f, fill=SUB)
     if product.price > 0:
-        d.text((MARGIN + 30, top + 124), f"{product.price:,}원", font=_font(60), fill=(225, 29, 72, 255))
-    _badges(d, MARGIN + 30 + 380, top + 140, product)
+        d.text((MARGIN + 30, card_top + 124), f"{product.price:,}원", font=_font(60), fill=(225, 29, 72, 255))
+    _badges(d, MARGIN + 30 + 380, card_top + 140, product)
     _dots(d, page, total, accent)
     return Image.alpha_composite(canvas, ov).convert("RGB")
 
@@ -324,7 +369,8 @@ def _cta_slide(cta: str, product: Product, accent, page: int, total: int) -> Ima
 
 
 # ───────────────────────── 진입점 ─────────────────────────
-def render_all(story: dict, scene_imgs: list[Image.Image], product_img: Image.Image, product: Product, out_dir: Path) -> list[Path]:
+def render_all(story: dict, scene_imgs: list[Image.Image], product_img: Image.Image, product: Product, out_dir: Path,
+               backdrop: Image.Image | None = None) -> list[Path]:
     out_dir.mkdir(parents=True, exist_ok=True)
     accent = dominant_color(product_img)
     total = 6
@@ -332,7 +378,7 @@ def render_all(story: dict, scene_imgs: list[Image.Image], product_img: Image.Im
         _panel_slide(scene_imgs[0], story["hook"], accent, 0, total, cover=True, subtitle=story["panels"][0]["caption"]),
         _panel_slide(scene_imgs[1], story["panels"][1]["caption"], accent, 1, total, cover=False),
         _panel_slide(scene_imgs[2], story["panels"][2]["caption"], accent, 2, total, cover=False),
-        _product_slide(product_img, product, story["reveal"], accent, 3, total),
+        _product_slide(product_img, product, story["reveal"], accent, 3, total, backdrop),
         _for_whom_slide(story["for_whom"], accent, 4, total),
         _cta_slide(story["cta"], product, accent, 5, total),
     ]
