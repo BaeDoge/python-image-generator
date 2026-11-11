@@ -224,34 +224,97 @@ class SelectorTests(unittest.TestCase):
         self.assertNotIn("1", [p.id for p in ranked])
 
 
+def _fake_llm(analysis, plans, repairs=None, facts=None, counter=None):
+    """시스템 프롬프트로 호출 종류를 구분하는 가짜 chat_json"""
+    plans, repairs, facts = list(plans), list(repairs or []), list(facts or [])
+    counter = counter if counter is not None else {}
+
+    def fake(messages, **kw):
+        system = messages[0]["content"]
+        for name, key in (("상품을 분석하는 기획자", "analyze"), ("콘텐츠 디렉터", "plan"),
+                          ("카피 교정자", "repair"), ("콘텐츠 검수자", "fact")):
+            if name in system:
+                counter[key] = counter.get(key, 0) + 1
+                if key == "analyze":
+                    return analysis
+                src = {"plan": plans, "repair": repairs, "fact": facts}[key]
+                return src.pop(0) if src else ({"unsupported_claims": [], "unrelated_scenes": []} if key == "fact" else {})
+        raise AssertionError(system[:30])
+    return fake
+
+
+class SoftenTests(unittest.TestCase):
+    def test_common_formal_endings_become_colloquial(self):
+        cases = {
+            "먼지 제거를 소개합니다.": "먼지 제거를 소개해요.",
+            "계단 청소도 수월합니다": "계단 청소도 수월해요",
+            "도와드립니다": "도와드려요",
+            "무선 청소기입니다": "무선 청소기예요",
+            "가격입니다": "가격이에요",
+            "수납이 좋습니다": "수납이 좋아요",
+            "먼지가 많았습니다": "먼지가 많았어요",
+            "자리가 있습니다": "자리가 있어요",
+        }
+        for src, dst in cases.items():
+            self.assertEqual(verify.soften_endings(src), dst)
+
+    def test_unhandled_btn_forms_are_left_for_llm_repair(self):
+        self.assertIn("니다", verify.soften_endings("계단 오르는 것이 힘듭니다"))
+
+
 class PlannerTests(unittest.TestCase):
     def _product(self):
         return Product("1", "무선 핸디 청소기 대용량 배터리 올인원 세트", 59900, "img", "url", True, True, "가전디지털")
 
-    def test_retry_loop_with_text_and_fact_checks(self):
-        bad_cjk = json.loads(json.dumps(GOOD)); bad_cjk["panels"][0]["caption"] = "沙发角落 먼지 쌓인 곳"
-        plans = [bad_cjk, GOOD, GOOD, GOOD]
-        facts = [{"unsupported_claims": ["흡입력이 강력해요"], "unrelated_scenes": []},
-                 {"unsupported_claims": [], "unrelated_scenes": ["a stroller wheel with dust"]},
-                 {"unsupported_claims": [], "unrelated_scenes": []}]
-        analysis = dict(ANALYSIS, explicit_facts=["대용량 배터리"], typical_situations=["바닥 청소"])
-
-        def fake(messages, **kw):
-            system = messages[0]["content"]
-            if "상품을 분석하는 기획자" in system:
-                return analysis
-            if "콘텐츠 디렉터" in system:
-                return plans.pop(0)
-            return facts.pop(0)
+    def _run(self, fake):
         orig = llm.chat_json
         llm.chat_json = fake
         try:
-            story, an, report = planner.build_story(self._product(), "https://link.coupang.com/x")
+            return planner.build_story(self._product(), "https://link.coupang.com/x")
         finally:
             llm.chat_json = orig
-        self.assertEqual(len(report["attempts"]), 4)  # 한자 반려 -> 주장 반려 -> 무관 장면 반려 -> 통과
-        self.assertLessEqual(len(story["text"]), 500)
+
+    def test_stubborn_formal_ending_is_fixed_by_field_repair_not_regeneration(self):
+        """실제 로그: 모델이 '~합니다'만 계속 반복 -> 전체 재생성 대신 해당 필드만 교정"""
+        bad = json.loads(json.dumps(GOOD))
+        bad["body"] = GOOD["body"] + " 계단 오르는 것이 힘듭니다. 가볍게 쓰기 좋아요."
+        cnt = {}
+        fake = _fake_llm(ANALYSIS, [bad], repairs=[{"fixes": {"body": GOOD["body"]}}], counter=cnt)
+        story, _, report = self._run(fake)
+        self.assertEqual(cnt["plan"], 1)       # 전체 재생성 없음
+        self.assertEqual(cnt["repair"], 1)
+        self.assertEqual(report["attempts"][0]["repairs"], 1)
+        self.assertEqual(story["body"], GOOD["body"])
+
+    def test_hanja_caption_repaired_then_soft_budget_leaves_warning(self):
+        bad = json.loads(json.dumps(GOOD)); bad["panels"][0]["caption"] = "沙发角落 먼지 쌓인 곳"
+        fix = {"fixes": {"panels[1].caption": "퇴근하고 보니 바닥에 먼지가 한가득"}}
+        facts = [{"unsupported_claims": ["흡입력이 강력해요"], "unrelated_scenes": []},
+                 {"unsupported_claims": [], "unrelated_scenes": ["a stroller wheel with dust"]}]
+        cnt = {}
+        story, _, report = self._run(_fake_llm(ANALYSIS, [bad, GOOD, GOOD], [fix], facts, cnt))
+        self.assertEqual(len(report["attempts"]), 3)     # 교정 후 통과 -> 검수 2회 반려 -> 경고로 채택
+        self.assertEqual(cnt["fact"], 2)
+        self.assertEqual(report["fact_check"], "warnings")
         self.assertIn(verify.DISCLOSURE, story["text"])
+        self.assertLessEqual(len(story["text"]), 500)
+
+    def test_llm_review_claim_is_mapped_to_field_and_repaired(self):
+        flagged = json.loads(json.dumps(GOOD)); flagged["cta"] = "배터리 걱정 없이 쓰기"
+        facts = [{"unsupported_claims": ["배터리 걱정 없이 쓰기"], "unrelated_scenes": []},
+                 {"unsupported_claims": [], "unrelated_scenes": []}]
+        cnt = {}
+        story, _, report = self._run(_fake_llm(ANALYSIS, [flagged], [{"fixes": {"cta": "자세한 건 링크에서 확인해요"}}], facts, cnt))
+        self.assertEqual(cnt["plan"], 1)
+        self.assertEqual(story["cta"], "자세한 건 링크에서 확인해요")
+        self.assertEqual(report["fact_check"], "ok")
+
+    def test_structural_problem_regenerates_whole_story(self):
+        broken = json.loads(json.dumps(GOOD)); broken["panels"] = broken["panels"][:2]
+        cnt = {}
+        self._run(_fake_llm(ANALYSIS, [broken, GOOD], counter=cnt))
+        self.assertEqual(cnt["plan"], 2)
+        self.assertNotIn("repair", cnt)
 
     def test_risky_product_is_skipped(self):
         orig = llm.chat_json

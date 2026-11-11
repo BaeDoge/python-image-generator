@@ -22,6 +22,26 @@ BANNED = [
 # 광고체/문어체 종결 (~합니다, ~드립니다, ~소개합니다) -> 사람이 쓴 구어체가 아님
 _FORMAL = re.compile(r"니다(?=[\s.!?…~]|$)")
 
+def _has_batchim(ch: str) -> bool:
+    return "가" <= ch <= "힣" and (ord(ch) - 0xAC00) % 28 != 0
+
+
+def _jung(ch: str) -> int:
+    return ((ord(ch) - 0xAC00) // 28) % 21
+
+
+def soften_endings(text: str) -> str:
+    """흔한 광고체 종결을 안전한 규칙으로만 구어체(해요체)로 바꾼다. (힘듭니다 같은 ㅂ니다 활용은 LLM 교정 단계로)"""
+    for a, b in (("드립니다", "드려요"), ("합니다", "해요"), ("됩니다", "돼요"), ("있습니다", "있어요"),
+                 ("없습니다", "없어요"), ("같습니다", "같아요")):
+        text = text.replace(a, b)
+    text = re.sub(r"([았었겠])습니다", r"\1어요", text)
+    text = re.sub(r"([가-힣])입니다", lambda m: m.group(1) + ("이에요" if _has_batchim(m.group(1)) else "예요"), text)
+    # 받침 있는 어간 + 습니다: 모음조화(ㅏ/ㅗ -> 아요, 그 외 어요)
+    text = re.sub(r"([가-힣])습니다", lambda m: m.group(1) + ("아요" if _jung(m.group(1)) in (0, 8) else "어요"), text)
+    return text
+
+
 # 상품명에 없는데 LLM 이 자주 덧붙이는 '장점' 어간. 상품명에 같은 어간이 있을 때만 허용한다.
 BENEFIT_STEMS = ["가볍", "가벼", "수월", "손쉽", "간편", "편리", "강력", "오래 쓸", "오래 쓰", "깔끔하게", "튼튼", "조용", "빠르게", "효과"]
 
