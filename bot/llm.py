@@ -20,19 +20,19 @@ def _client(base_url: str | None = None, api_key: str | None = None) -> OpenAI:
     )
 
 
-def _extra() -> dict:
-    if flag("LLM_DISABLE_THINKING", True):
+def _extra(think: bool = False) -> dict:
+    if not think and flag("LLM_DISABLE_THINKING", True):
         return {"extra_body": {"chat_template_kwargs": {"enable_thinking": False}}}
     return {}
 
 
-def chat(messages: list[dict], max_tokens: int = 1600, temperature: float = 0.8) -> str:
+def chat(messages: list[dict], max_tokens: int = 1600, temperature: float = 0.8, think: bool = False) -> str:
     resp = _client().chat.completions.create(
         model=get("LLM_MODEL", "local"),
         messages=messages,
         max_tokens=max_tokens,
         temperature=temperature,
-        **_extra(),
+        **_extra(think),
     )
     return resp.choices[0].message.content or ""
 
@@ -45,11 +45,12 @@ def extract_json(text: str) -> dict:
     return json.loads(m.group(0))
 
 
-def chat_json(messages: list[dict], max_tokens: int = 1600, temperature: float = 0.8, tries: int = 3) -> dict:
+def chat_json(messages: list[dict], max_tokens: int = 1600, temperature: float = 0.8, tries: int = 3,
+              think: bool = False) -> dict:
     last: Exception | None = None
     msgs = list(messages)
     for _ in range(tries):
-        raw = chat(msgs, max_tokens=max_tokens, temperature=temperature)
+        raw = chat(msgs, max_tokens=max_tokens, temperature=temperature, think=think)
         try:
             return extract_json(raw)
         except Exception as e:  # noqa: BLE001

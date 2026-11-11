@@ -123,6 +123,7 @@ def cmd_post(args) -> None:
     paths = compose.render_all(story, picks[:3], prod_img, product, out_dir, backdrop=picks[3])
     semantic = any(r["semantic_verified"] for r in img_results)
     warnings = [] if semantic else ["비전 모델(VLM)이 없어 이미지 의미 검증은 CLIP 순위/기본 품질 검사만 수행됨"]
+    warnings += [f"LLM 검수 미해결: {w}" for w in text_report.get("warnings", [])]
     report = {"text": text_report, "images": img_results, "critical": critical, "warnings": warnings}
     (out_dir / "verify.json").write_text(json.dumps(report, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
     (out_dir / "post.json").write_text(

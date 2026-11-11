@@ -116,6 +116,66 @@ class ToneAndClaimTests(unittest.TestCase):
         self.assertEqual(verify.check_story(ok, ANALYSIS, 70, 220, self.NAME), [])
 
 
+class LogRegressionTests(unittest.TestCase):
+    """사용자 PC 의 실제 로그(2026-11-11)에서 발견된 오탐/누락을 고정"""
+    NAME = "무선 핸디 청소기 대용량 배터리 올인원 세트"
+
+    def test_claims_copied_from_product_name_are_grounded(self):
+        for c in ("대용량 배터리", "올인원 세트", "대용량 배터리 올인원 세트 등장"):
+            self.assertTrue(verify._grounded(c, self.NAME), c)
+        for c in ("흡입력이 강력해요", "올인원 세트로 청소 부담 덜어보세요", "30분 연속 사용"):
+            self.assertFalse(verify._grounded(c, self.NAME), c)
+
+    def test_fact_check_drops_false_positives(self):
+        orig = llm.chat_json
+        llm.chat_json = lambda *a, **k: {"unsupported_claims": ["대용량 배터리", "올인원 세트"],
+                                         "unrelated_scenes": ["a stroller wheel"]}
+        try:
+            probs = verify.fact_check(GOOD, Product("1", self.NAME, 59900, "i", "u", True, True, "c"), ANALYSIS)
+        finally:
+            llm.chat_json = orig
+        self.assertEqual(len(probs), 1)
+        self.assertIn("무관한 장면", probs[0])
+
+    def test_scene_meta_leak_and_numbers_and_cta_length(self):
+        bad = json.loads(json.dumps(GOOD))
+        bad["panels"][0]["scene"] = "Silhouette near a sofa, visual motif: sofa and dust"
+        bad["body"] = GOOD["body"] + " 30분 쓸 수 있어."
+        bad["cta"] = "가" * 31
+        probs = " | ".join(verify.check_story(bad, ANALYSIS, 70, 260, self.NAME, 59900))
+        self.assertIn("설명 문구", probs)
+        self.assertIn("숫자", probs)
+        self.assertIn("cta 는 1~30자", probs)
+
+    def test_price_and_name_numbers_allowed(self):
+        ok = json.loads(json.dumps(GOOD)); ok["body"] = GOOD["body"] + " 59,900원이야."
+        self.assertEqual(verify.check_story(ok, ANALYSIS, 70, 260, self.NAME, 59900), [])
+
+    def test_planner_accepts_with_warnings_after_soft_budget(self):
+        analysis = dict(ANALYSIS)
+        plans = [GOOD, GOOD, GOOD]
+        calls = {"facts": 0}
+
+        def fake(messages, **kw):
+            system = messages[0]["content"]
+            if "상품을 분석하는 기획자" in system:
+                return analysis
+            if "콘텐츠 디렉터" in system:
+                return plans.pop(0)
+            calls["facts"] += 1
+            return {"unsupported_claims": ["흡입력이 강력해요"], "unrelated_scenes": []}
+        orig = llm.chat_json
+        llm.chat_json = fake
+        try:
+            story, _, report = planner.build_story(Product("1", self.NAME, 59900, "i", "u", True, True, "c"), "https://x.co/a")
+        finally:
+            llm.chat_json = orig
+        self.assertEqual(calls["facts"], 2)            # LLM 판정은 2회까지만 재기획에 반영
+        self.assertEqual(len(report["attempts"]), 3)   # 3번째 시도는 확정 규칙만 통과하면 채택
+        self.assertEqual(report["fact_check"], "warnings")
+        self.assertTrue(report["warnings"])
+
+
 class ImageCheckTests(unittest.TestCase):
     def test_degenerate_images_fail(self):
         for color in ((0, 0, 0), (255, 255, 255), (200, 180, 170)):
