@@ -4,3 +4,4 @@
 
 .venv\Scripts\python -m pip install --no-cache-dir requests python-dotenv openai pillow diffusers transformers accelerate safetensors peft
 
+
