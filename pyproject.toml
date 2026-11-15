@@ -1,7 +1,7 @@
 [project]
-name = "threads-coupang-bot"
+name = "ai-illustration-studio"
 version = "0.1.0"
-description = "쿠팡 파트너스 상품 -> 로컬 LLM 카피 + 로컬 GPU 카툰 이미지 -> Threads 자동 게시"
+description = "Local SDXL image generation, scene planning, candidate review, and multi-panel illustration composition."
 requires-python = ">=3.11,<3.13"
 dependencies = [
   "requests>=2.31",
@@ -16,7 +16,7 @@ dependencies = [
   "peft>=0.12",
 ]
 
-# Windows + NVIDIA(A5000)에서 CUDA 빌드 torch를 받기 위한 설정
+# Windows + NVIDIA GPU environments use the CUDA-enabled PyTorch index.
 [tool.uv.sources]
 torch = { index = "pytorch-cu124" }
 
